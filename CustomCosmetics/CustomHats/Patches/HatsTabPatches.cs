@@ -23,7 +23,7 @@ internal static class HatsTabPatches
             Object.Destroy(__instance.scroller.Inner.GetChild(i).gameObject);
         }
 
-        __instance.ColorChips = new Il2CppSystem.Collections.Generic.List<ColorChip>();
+        __instance.ColorChips = new ISystem.List<ColorChip>();
         var unlockedHats = DestroyableSingleton<HatManager>.Instance.GetUnlockedHats();
         var packages = new Dictionary<string, List<Tuple<HatData, HatExtension>>>();
 
