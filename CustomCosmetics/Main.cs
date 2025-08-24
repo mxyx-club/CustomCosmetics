@@ -1,12 +1,13 @@
+global using HarmonyLib;
 global using static CustomCosmetics.Helpers;
 global using static CustomCosmetics.Logger;
-global using HarmonyLib;
+global using ISystem = Il2CppSystem.Collections.Generic;
 global using Main = CustomCosmetics.CosmeticsManager;
-using System.IO;
 using BepInEx;
 using BepInEx.Configuration;
 using BepInEx.Unity.IL2CPP;
 using CustomCosmetics.CustomHats;
+using System.IO;
 
 namespace CustomCosmetics;
 
@@ -39,9 +40,6 @@ public partial class CosmeticsManager : BasePlugin
             "Enable to only use local hat files without downloading from online repository");
         Repository = Config.Bind("CustomHats", "Repository Source", "https://raw.githubusercontent.com/TheOtherRolesAU/TheOtherHats/master"
             , "URL for downloading custom hats when Local Hats is disabled");
-
-
-
 
         Instance = this;
         CustomHatManager.LoadHats();
