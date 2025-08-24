@@ -1,12 +1,12 @@
 global using static CustomCosmetics.Helpers;
 global using static CustomCosmetics.Logger;
+global using HarmonyLib;
 global using Main = CustomCosmetics.CosmeticsManager;
 using System.IO;
 using BepInEx;
 using BepInEx.Configuration;
 using BepInEx.Unity.IL2CPP;
 using CustomCosmetics.CustomHats;
-using HarmonyLib;
 
 namespace CustomCosmetics;
 
@@ -26,14 +26,22 @@ public partial class CosmeticsManager : BasePlugin
     internal static string RepositoryUrl => Repository.Value.GithubUrl();
     public static ConfigEntry<string> Repository { get; set; }
     public static ConfigEntry<bool> LocalHats { get; set; }
+    public static ConfigEntry<bool> CosmeticsUnlocker { get; set; }
 
     public override void Load()
     {
         SetLogSource(Log);
         Harmony.PatchAll();
 
-        Repository = Config.Bind("CustomHats", "Repository Source", "https://raw.githubusercontent.com/TheOtherRolesAU/TheOtherHats/master");
-        LocalHats = Config.Bind("Custom", "Local Hats", false);
+        CosmeticsUnlocker = Config.Bind("General", "Cosmetics Unlocker", false, "Unlock all cosmetics in the game, including paid ones.");
+
+        LocalHats = Config.Bind("CustomHats", "Local Hats", false,
+            "Enable to only use local hat files without downloading from online repository");
+        Repository = Config.Bind("CustomHats", "Repository Source", "https://raw.githubusercontent.com/TheOtherRolesAU/TheOtherHats/master"
+            , "URL for downloading custom hats when Local Hats is disabled");
+
+
+
 
         Instance = this;
         CustomHatManager.LoadHats();
