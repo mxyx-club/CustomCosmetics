@@ -1,0 +1,53 @@
+name: Build All
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 20 * * 0'
+
+jobs:
+  build-all-branches:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        branch: ${{ fromJSON('["2023.11.28", "2024.6.4", "2025.3.25", "latest"]') }}
+    
+    steps:
+      - name: Checkout ${{ matrix.branch }}
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ matrix.branch }}
+          submodules: true
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Build
+        run: |
+          dotnet build CustomCosmetics/CustomCosmetics.csproj \
+            --configuration Release \
+            --output ./build-output-${{ matrix.branch }}
+
+      - name: Create zip and prepare for upload
+        run: |
+          mkdir -p ./build-output
+          cd ./build-output-${{ matrix.branch }}
+          zip -r ../build-output/CustomCosmetics-${{ matrix.branch }}.zip .
+
+      - name: Upload Zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: CustomCosmetics-${{ matrix.branch }}
+          path: ./build-output/CustomCosmetics-${{ matrix.branch }}.zip
+
+      - name: Cleanup
+        run: |
+          rm -rf ./build-output-${{ matrix.branch }}
+          rm -f ./build-output/CustomCosmetics-${{ matrix.branch }}.zip
+        if: always()
