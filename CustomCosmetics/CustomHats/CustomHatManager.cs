@@ -11,7 +11,6 @@ namespace CustomCosmetics.CustomHats;
 public static class CustomHatManager
 {
     public const string InnerslothPackageName = "Innersloth Hats";
-    public const string DeveloperPackageName = "Developer Hats";
     public const string ManifestFileName = "CustomHats.json";
 
     internal static List<CustomHatConfig> UnregisteredHats = new();

@@ -33,9 +33,7 @@ internal static class HatManagerPatches
                 // This means the file has not been downloaded yet, do nothing...
             }
         }
-
-        if (CustomHatManager.UnregisteredHats.Count == 0)
-            isLoaded = true;
+        if (CustomHatManager.UnregisteredHats.Count == 0) isLoaded = true;
         cache.Clear();
 
         __instance.allHats = allHats.ToArray();
@@ -46,5 +44,13 @@ internal static class HatManagerPatches
     private static void GetHatByIdPostfix()
     {
         isRunning = false;
+    }
+
+    [HarmonyPatch(typeof(CosmeticsCache), nameof(CosmeticsCache.GetHat))]
+    [HarmonyPrefix]
+    private static bool GetHatPrefix(string id, ref HatViewData __result)
+    {
+        Warn($"trying to load hat {id} from cosmetics cache");
+        return !CustomHatManager.ViewDataCache.TryGetValue(id, out __result);
     }
 }
