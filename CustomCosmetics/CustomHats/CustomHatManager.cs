@@ -11,7 +11,6 @@ namespace CustomCosmetics.CustomHats;
 public static class CustomHatManager
 {
     public const string InnerslothPackageName = "Innersloth Hats";
-    public const string DeveloperPackageName = "Developer Hats";
     public const string ManifestFileName = "CustomHats.json";
 
     internal static List<CustomHatConfig> UnregisteredHats = new();
@@ -84,6 +83,8 @@ public static class CustomHatManager
         hat.NoBounce = !ch.Bounce;
         hat.ChipOffset = new Vector2(0f, 0.2f);
         hat.Free = true;
+        if (ch.Adaptive && cachedShader != null)
+            viewData.AltShader = cachedShader;
 
         var extend = new HatExtension
         {

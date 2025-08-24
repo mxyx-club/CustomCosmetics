@@ -1,5 +1,6 @@
 global using static CustomCosmetics.Helpers;
 global using static CustomCosmetics.Logger;
+global using ISystem = Il2CppSystem.Collections.Generic;
 global using Main = CustomCosmetics.CosmeticsManager;
 using System.IO;
 using BepInEx;

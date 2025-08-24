@@ -5,25 +5,25 @@ using AmongUs.Data;
 using HarmonyLib;
 using TMPro;
 using UnityEngine;
-using Object = UnityEngine.Object;
+using UObject = UnityEngine.Object;
 
 namespace CustomCosmetics.CustomHats.Patches;
 
-[HarmonyPatch]
+[HarmonyPatch(typeof(HatsTab))]
 internal static class HatsTabPatches
 {
     private static TextMeshPro textTemplate;
 
-    [HarmonyPatch(typeof(HatsTab), nameof(HatsTab.OnEnable))]
-    [HarmonyPrefix]
-    private static bool OnEnablePrefix(HatsTab __instance)
+    [HarmonyPatch(nameof(HatsTab.OnEnable))]
+    [HarmonyPostfix]
+    private static void OnEnablePostfix(HatsTab __instance)
     {
         for (var i = 0; i < __instance.scroller.Inner.childCount; i++)
         {
-            Object.Destroy(__instance.scroller.Inner.GetChild(i).gameObject);
+            UObject.Destroy(__instance.scroller.Inner.GetChild(i).gameObject);
         }
 
-        __instance.ColorChips = new Il2CppSystem.Collections.Generic.List<ColorChip>();
+        __instance.ColorChips = new ISystem.List<ColorChip>();
         var unlockedHats = DestroyableSingleton<HatManager>.Instance.GetUnlockedHats();
         var packages = new Dictionary<string, List<Tuple<HatData, HatExtension>>>();
 
@@ -40,17 +40,17 @@ internal static class HatsTabPatches
             {
                 if (!packages.ContainsKey(CustomHatManager.InnerslothPackageName))
                     packages[CustomHatManager.InnerslothPackageName] = new List<Tuple<HatData, HatExtension>>();
-                packages[CustomHatManager.InnerslothPackageName]
-                    .Add(new Tuple<HatData, HatExtension>(hatBehaviour, null));
+                packages[CustomHatManager.InnerslothPackageName].Add(new Tuple<HatData, HatExtension>(hatBehaviour, null));
             }
         }
 
-        textTemplate = GameObject.Find("HatsGroup").transform.FindChild("Text").GetComponent<TextMeshPro>();
         var yOffset = __instance.YStart;
+        textTemplate = GameObject.Find("HatsGroup").transform.FindChild("Text").GetComponent<TextMeshPro>();
 
         var orderedKeys = packages.Keys.OrderBy(x =>
             x switch
             {
+                // 分类排序
                 CustomHatManager.InnerslothPackageName => 1000,
                 _ => 500
             });
@@ -61,8 +61,6 @@ internal static class HatsTabPatches
         }
 
         __instance.scroller.ContentYBounds.max = -(yOffset + 4.1f);
-
-        return false;
     }
 
     private static float CreateHatPackage(List<Tuple<HatData, HatExtension>> hats, string packageName, float yStart,
@@ -75,7 +73,7 @@ internal static class HatsTabPatches
         var offset = yStart;
         if (textTemplate != null)
         {
-            var title = Object.Instantiate(textTemplate, hatsTab.scroller.Inner);
+            var title = UObject.Instantiate(textTemplate, hatsTab.scroller.Inner);
             title.transform.localPosition = new Vector3(2.25f, yStart, -1f);
             title.transform.localScale = Vector3.one * 1.5f;
             title.fontSize *= 0.5f;
@@ -89,22 +87,20 @@ internal static class HatsTabPatches
             var (hat, ext) = hats[i];
             var xPos = hatsTab.XRange.Lerp(i % hatsTab.NumPerRow / (hatsTab.NumPerRow - 1f));
             var yPos = offset - (i / hatsTab.NumPerRow * (isDefaultPackage ? 1f : 1.5f) * hatsTab.YOffset);
-            var colorChip = Object.Instantiate(hatsTab.ColorTabPrefab, hatsTab.scroller.Inner);
+            var colorChip = UObject.Instantiate(hatsTab.ColorTabPrefab, hatsTab.scroller.Inner);
             if (ActiveInputManager.currentControlType == ActiveInputManager.InputType.Keyboard)
             {
                 colorChip.Button.OnMouseOver.AddListener((Action)(() => hatsTab.SelectHat(hat)));
                 colorChip.Button.OnMouseOut.AddListener((Action)(() =>
-                    hatsTab.SelectHat(
-                        DestroyableSingleton<HatManager>.Instance.GetHatById(DataManager.Player.Customization.Hat))));
+                    hatsTab.SelectHat(DestroyableSingleton<HatManager>.Instance.GetHatById(DataManager.Player.Customization.Hat))));
                 colorChip.Button.OnClick.AddListener((Action)hatsTab.ClickEquip);
             }
             else
             {
                 colorChip.Button.OnClick.AddListener((Action)(() => hatsTab.SelectHat(hat)));
             }
-
             colorChip.Button.ClickMask = hatsTab.scroller.Hitbox;
-            colorChip.Inner.SetMaskType(PlayerMaterial.MaskType.SimpleUI);
+            colorChip.Inner.SetMaskType(PlayerMaterial.MaskType.ScrollingUI);
             hatsTab.UpdateMaterials(colorChip.Inner.FrontLayer, hat);
             var background = colorChip.transform.FindChild("Background");
             var foreground = colorChip.transform.FindChild("ForeGround");
@@ -116,18 +112,17 @@ internal static class HatsTabPatches
                     background.localPosition = Vector3.down * 0.243f;
                     background.localScale = new Vector3(background.localScale.x, 0.8f, background.localScale.y);
                 }
-
                 if (foreground != null)
                     foreground.localPosition = Vector3.down * 0.243f;
 
                 if (textTemplate != null)
                 {
-                    var description = Object.Instantiate(textTemplate, colorChip.transform);
+                    var description = UObject.Instantiate(textTemplate, colorChip.transform);
                     description.transform.localPosition = new Vector3(0f, -0.65f, -1f);
                     description.alignment = TextAlignmentOptions.Center;
                     description.transform.localScale = Vector3.one * 0.65f;
                     hatsTab.StartCoroutine(Effects.Lerp(0.1f,
-                        new Action<float>(p => { description.SetText($"{hat.name}\nby {ext.Author}"); })));
+                       new Action<float>(p => { description.SetText($"{hat.name}\nby {ext.Author}"); })));
                 }
             }
 
@@ -135,8 +130,7 @@ internal static class HatsTabPatches
             colorChip.Inner.SetHat(hat,
                 hatsTab.HasLocalPlayer()
                     ? PlayerControl.LocalPlayer.Data.DefaultOutfit.ColorId
-                    : DataManager.Player.Customization.Color);
-            colorChip.Inner.transform.localPosition = hat.ChipOffset;
+                    : DataManager.Player.Customization.Color); colorChip.Inner.transform.localPosition = hat.ChipOffset;
             colorChip.Tag = hat;
             colorChip.SelectionHighlight.gameObject.SetActive(false);
             hatsTab.ColorChips.Add(colorChip);

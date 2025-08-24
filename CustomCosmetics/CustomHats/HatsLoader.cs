@@ -44,7 +44,7 @@ public class HatsLoader : MonoBehaviour
         try
         {
             var path = Path.Combine(CosmeticsManager.CustomHatsDir, ManifestFileName);
-            Warn($"加载本地帽子文件 {path}");
+            Message($"加载本地帽子文件 {path}");
             var localFileContent = File.ReadAllText(path);
             var response = JsonSerializer.Deserialize<HatsConfigFile>(localFileContent, new JsonSerializerOptions
             {
@@ -66,7 +66,7 @@ public class HatsLoader : MonoBehaviour
             downloadHandler = new DownloadHandlerBuffer()
         };
 
-        Warn($"正在下载帽子配置文件: {CosmeticsManager.RepositoryUrl}/{ManifestFileName}");
+        Message($"正在下载帽子配置文件: {CosmeticsManager.RepositoryUrl}/{ManifestFileName}");
         www.url = $"{CosmeticsManager.RepositoryUrl}/{ManifestFileName}";
 
         var operation = www.SendWebRequest();
@@ -78,7 +78,7 @@ public class HatsLoader : MonoBehaviour
 
         if (www.isNetworkError || www.isHttpError)
         {
-            Warn($"下载帽子配置文件时出错: {www.error}");
+            Error($"下载帽子配置文件时出错: {www.error}");
             isSuccessful = false;
             LoadLocalHats();
             yield break;
@@ -92,7 +92,7 @@ public class HatsLoader : MonoBehaviour
             }
 
             File.WriteAllText(path, www.downloadHandler.text);
-            Warn($"帽子清单已保存到: {path}");
+            Message($"帽子清单已保存到: {path}");
 
             var downloadedFileContent = File.ReadAllText(path);
             var response = JsonSerializer.Deserialize<HatsConfigFile>(downloadedFileContent, new JsonSerializerOptions
@@ -118,9 +118,9 @@ public class HatsLoader : MonoBehaviour
     private void ProcessHatsData(HatsConfigFile response)
     {
         UnregisteredHats.AddRange(SanitizeHats(response));
-        Warn($"读取了 {UnregisteredHats.Count} 项帽子");
+        Message($"读取了 {UnregisteredHats.Count} 项帽子");
 
-        if (!isSuccessful  || Main.LocalHats.Value)
+        if (!isSuccessful || Main.LocalHats.Value)
         {
             Warn("在线配置文件无效，取消下载任务。");
             return;
@@ -128,7 +128,7 @@ public class HatsLoader : MonoBehaviour
 
         var toDownload = GenerateDownloadList(UnregisteredHats);
 
-        Warn($"准备下载 {toDownload.Count} 项帽子文件");
+        Message($"准备下载 {toDownload.Count} 项帽子文件");
 
         this.StartCoroutine(CoDownloadAllHats(toDownload));
     }
@@ -140,7 +140,7 @@ public class HatsLoader : MonoBehaviour
             yield return CoDownloadHatAsset(fileName);
         }
 
-        Warn("所有帽子文件下载完成");
+        Message("所有帽子文件下载完成");
     }
 
     private IEnumerator CoDownloadHatAsset(string fileName)
@@ -165,13 +165,13 @@ public class HatsLoader : MonoBehaviour
 
         var filePath = Path.Combine(CosmeticsManager.CustomHatsDir, fileName);
         filePath = filePath.Replace("%20", " ");
-        var persistTask = File.WriteAllBytesAsync(filePath, www.downloadHandler.GetNativeData().ToArray());
+        var persistTask = File.WriteAllBytesAsync(filePath, www.downloadHandler.data);
         while (!persistTask.IsCompleted)
         {
-            Warn($"正在下载: {fileName}");
+            Message($"正在下载: {fileName}");
             if (persistTask.Exception != null)
             {
-                Warn($"下载 {fileName} Error: {persistTask.Exception.Message}");
+                Error($"下载 {fileName} Error: {persistTask.Exception.Message}");
                 break;
             }
 
