@@ -1,33 +1,19 @@
-using Cpp2IL.Core.Extensions;
-using System;
-using System.Linq;
-
 namespace CustomCosmetics.CustomVisors.Patches;
 
 [HarmonyPatch(typeof(HatManager))]
 internal static class VisorManagerPatches
 {
-    private static bool _isLoaded;
+    private static bool _isRunning;
 
     [HarmonyPatch(nameof(HatManager.GetVisorById))]
     [HarmonyPrefix]
     private static void GetVisorByIdPrefix(HatManager __instance)
     {
-        if (_isLoaded) return;
-
-        var allVisors = __instance.allVisors.ToList();
-        var cache = CustomVisorManager.UnregisteredVisors.Clone();
-        foreach (var visorConfig in cache)
-        {
-            try
-            {
-                allVisors.Add(CustomVisorManager.CreateVisorBehaviour(visorConfig));
-                CustomVisorManager.UnregisteredVisors.Remove(visorConfig);
-            }
-            catch { }
-        }
-        __instance.allVisors = allVisors.ToArray();
-        if (CustomVisorManager.UnregisteredVisors.Count == 0) _isLoaded = true;
+        if (_isRunning || CustomVisorManager.ReadyVisors.Count == 0) return;
+        _isRunning = true;
+        // reset even on throw, otherwise visors can never be injected again this session
+        try { CustomVisorManager.InjectReady(__instance, CustomVisorManager.InjectPerFrame); }
+        finally { _isRunning = false; }
     }
 
     [HarmonyPatch(typeof(CosmeticsCache), nameof(CosmeticsCache.GetVisor))]

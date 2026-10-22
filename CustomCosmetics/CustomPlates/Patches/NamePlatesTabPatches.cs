@@ -1,6 +1,5 @@
 using AmongUs.Data;
 using Cpp2IL.Core.Extensions;
-using CustomCosmetics.Core;
 using Innersloth.Assets;
 using System;
 using System.Collections.Generic;
@@ -81,7 +80,7 @@ internal static class NameplatesTabPatches
         }
         catch (Exception ex)
         {
-            Error($"NameplatesTab rebuild failed: {ex}");
+            Error($"tab rebuild failed: {ex}", "nameplates");
             return false;
         }
     }

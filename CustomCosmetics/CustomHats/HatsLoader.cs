@@ -15,33 +15,57 @@ public class HatsLoader : CosmeticsLoader
 
     protected override void OnConfig(string json, bool local)
     {
-        var r = JsonSerializer.Deserialize<HatsConfigFile>(json, new JsonSerializerOptions
+        var config = JsonSerializer.Deserialize<HatsConfigFile>(json, new JsonSerializerOptions
         {
             AllowTrailingCommas = true,
             PropertyNameCaseInsensitive = true
         });
-        if (r == null || r.Hats == null) return;
+        if (config?.Hats == null) return;
 
-        RegisterPackages(r.Packages, CustomHatManager.PackageDisplayNames, CustomHatManager.PackagePriorities);
-        Sanitize(r);
-        CustomHatManager.UnregisteredHats.AddRange(r.Hats);
-        Message($"Loaded {r.Hats.Count} hats ({MissingFiles().Count} resource files)");
+        RegisterPackages(config.Packages, CustomHatManager.PackageDisplayNames, CustomHatManager.PackagePriorities);
+        PrefixResources(config);
+        var dropped = config.Hats.RemoveAll(hat => hat.Resource == null);
+        if (dropped > 0) Warn($"[{Alias}] {dropped} entries without a valid .png resource skipped", Kind);
+        CustomHatManager.UnregisteredHats.AddRange(config.Hats);
+        Message($"[{Alias}] {config.Hats.Count} hats loaded, {MissingFiles().Count} resources to sync", Kind);
+        CustomHatManager.PromoteAll();
     }
 
-    protected override List<string> MissingFiles()
+    protected override List<string> MissingFiles() =>
+        CustomHatManager.GenerateDownloadList(CustomHatManager.UnregisteredHats);
+
+    protected override void OnFileReady(string file) => CustomHatManager.PromoteFor(file);
+
+    // HostNotReady makes the drain loop retry on the next frame
+    protected override int InjectBatch()
     {
-        return CustomHatManager.GenerateDownloadList(CustomHatManager.UnregisteredHats);
+        if (CustomHatManager.ReadyHats.Count == 0) return 0;
+        var hatManager = DestroyableSingleton<HatManager>.Instance;
+        return hatManager == null || hatManager.allHats == null
+            ? HostNotReady
+            : CustomHatManager.InjectReady(hatManager, CustomHatManager.InjectPerFrame);
     }
 
-    private void Sanitize(HatsConfigFile r)
+    protected override void OnDownloadComplete()
     {
-        foreach (var h in r.Hats)
+        var blocked = new List<string>();
+        foreach (var hat in CustomHatManager.UnregisteredHats)
         {
-            h.Resource = PrefixResource(h.Resource);
-            h.BackResource = PrefixResource(h.BackResource);
-            h.ClimbResource = PrefixResource(h.ClimbResource);
-            h.FlipResource = PrefixResource(h.FlipResource);
-            h.BackFlipResource = PrefixResource(h.BackFlipResource);
+            var gate = CustomHatManager.MissingGateField(hat);
+            if (gate != null) blocked.Add($"{hat.Name}({gate})");
+        }
+        ReportNotReady(blocked);
+    }
+
+    private void PrefixResources(HatsConfigFile config)
+    {
+        foreach (var hat in config.Hats)
+        {
+            hat.Resource = PrefixResource(hat.Resource);
+            hat.BackResource = PrefixResource(hat.BackResource);
+            hat.ClimbResource = PrefixResource(hat.ClimbResource);
+            hat.FlipResource = PrefixResource(hat.FlipResource);
+            hat.BackFlipResource = PrefixResource(hat.BackFlipResource);
         }
     }
 }

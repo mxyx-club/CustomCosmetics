@@ -4,6 +4,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Security.Cryptography;
 using UnityEngine;
 using UnityEngine.Networking;
@@ -14,6 +15,7 @@ public class CosmeticsLoader : MonoBehaviour
 {
     // download pipeline: config fetch -> MD5 diff -> PNG fetch
     private bool _busy;
+    private bool _draining;
     private bool _ok = true;
     private static MD5 _md5;
     private List<RepositorySource> _sources = new();
@@ -24,7 +26,12 @@ public class CosmeticsLoader : MonoBehaviour
     [HideFromIl2Cpp] protected virtual string ResDir => "";
     [HideFromIl2Cpp] protected virtual string LocalDir => "";
     [HideFromIl2Cpp] protected virtual void OnConfig(string json, bool local) { }
+    [HideFromIl2Cpp] protected virtual void OnFileReady(string file) { }
+    [HideFromIl2Cpp] protected virtual void OnDownloadComplete() { }
     [HideFromIl2Cpp] protected virtual List<string> MissingFiles() { return new List<string>(); }
+    // >0 records injected, 0 queue empty, HostNotReady host not ready
+    [HideFromIl2Cpp] protected virtual int InjectBatch() => 0;
+    protected const int HostNotReady = -1;
     [HideFromIl2Cpp] protected virtual string ConfigFor(RepositorySource src) => ConfigFile;
     [HideFromIl2Cpp] protected virtual string ResDirFor(RepositorySource src) => ResDir;
 
@@ -32,23 +39,23 @@ public class CosmeticsLoader : MonoBehaviour
     protected string Alias { get; private set; }
 
     [HideFromIl2Cpp]
-    protected string PrefixResource(string n)
+    protected string PrefixResource(string resource)
     {
-        if (n == null) return null;
-        var clean = CleanName(n);
+        if (resource == null) return null;
+        var clean = CleanName(resource);
         return clean == null ? null : $"{Alias}/{clean}";
     }
 
     [HideFromIl2Cpp]
-    protected static void RegisterPackages(List<PackageConfig> pkgs,
+    protected static void RegisterPackages(List<PackageConfig> packages,
         Dictionary<string, string> displayNames, Dictionary<string, int> priorities)
     {
-        if (pkgs == null) return;
-        foreach (var p in pkgs)
+        if (packages == null) return;
+        foreach (var package in packages)
         {
-            if (string.IsNullOrWhiteSpace(p.Package)) continue;
-            if (!string.IsNullOrWhiteSpace(p.DisplayName)) displayNames[p.Package] = p.DisplayName;
-            priorities[p.Package] = p.Priority;
+            if (string.IsNullOrWhiteSpace(package.Package)) continue;
+            if (!string.IsNullOrWhiteSpace(package.DisplayName)) displayNames[package.Package] = package.DisplayName;
+            priorities[package.Package] = package.Priority;
         }
     }
 
@@ -56,12 +63,53 @@ public class CosmeticsLoader : MonoBehaviour
     protected string ConfigPath(string alias) => Path.Combine(LocalDir, $"{Path.GetFileNameWithoutExtension(ConfigFile)}_{alias}.json");
 
     [HideFromIl2Cpp]
+    protected void ReportNotReady(List<string> entries)
+    {
+        if (entries.Count == 0) return;
+        var more = entries.Count > 10 ? $" (+{entries.Count - 10} more)" : "";
+        Warn($"{entries.Count} not ready: {string.Join(", ", entries.Take(10))}{more}", Kind);
+    }
+
+    [HideFromIl2Cpp]
     public void Fetch(List<RepositorySource> sources)
     {
         if (_busy) return;
         _sources = sources ?? new List<RepositorySource>();
-        if (_sources.Count == 0 && !Main.LocalOnly.Value) { Warn($"No repos for {Kind}"); return; }
+        if (_sources.Count == 0 && !Main.LocalOnly.Value) { Warn("no repositories configured", Kind); return; }
         this.StartCoroutine(CoFetch());
+    }
+
+    // decode one batch per frame; a single frame with too many textures crashes on mobile
+    [HideFromIl2Cpp]
+    protected void RequestInject()
+    {
+        if (_draining) return;
+        _draining = true;
+        this.StartCoroutine(CoInject());
+    }
+
+    [HideFromIl2Cpp]
+    private IEnumerator CoInject()
+    {
+        var retries = 0;
+        try
+        {
+            while (true)
+            {
+                var injected = InjectBatch();
+                if (injected > 0)
+                {
+                    retries = 0;
+                    yield return new WaitForEndOfFrame();
+                    continue;
+                }
+                if (injected == 0) break;
+                // host not ready: give up after ~30s, the next download re-requests
+                if (++retries > 60) break;
+                yield return new WaitForSecondsRealtime(0.5f);
+            }
+        }
+        finally { _draining = false; }
     }
 
     [HideFromIl2Cpp]
@@ -74,7 +122,7 @@ public class CosmeticsLoader : MonoBehaviour
         {
             _ok = true;
             Alias = src.Alias;
-            Message($"[{Kind}] {src.Url}");
+            Message($"[{src.Alias}] fetching config from {src.Url}", Kind);
             yield return CoFetchConfig(src);
         }
         _busy = false;
@@ -83,10 +131,10 @@ public class CosmeticsLoader : MonoBehaviour
     [HideFromIl2Cpp]
     private void LoadLocal()
     {
-        if (!Directory.Exists(LocalDir)) { Warn($"No {Kind} dir"); return; }
+        if (!Directory.Exists(LocalDir)) { Warn("local dir not found", Kind); return; }
 
         var files = Directory.GetFiles(LocalDir, "*.json");
-        if (files.Length == 0) { Warn($"No {Kind} configs"); return; }
+        if (files.Length == 0) { Warn("no local config files", Kind); return; }
 
         var prefix = $"{Path.GetFileNameWithoutExtension(ConfigFile)}_";
         foreach (var f in files)
@@ -97,9 +145,11 @@ public class CosmeticsLoader : MonoBehaviour
             {
                 var json = File.ReadAllText(f);
                 OnConfig(json, local: true);
+                RequestInject();
             }
-            catch (Exception ex) { Warn($"{Path.GetFileName(f)}: {ex.Message}"); }
+            catch (Exception ex) { Warn($"[{Alias}] {Path.GetFileName(f)}: {ex.Message}", Kind); }
         }
+        OnDownloadComplete();
     }
 
     [HideFromIl2Cpp]
@@ -117,7 +167,7 @@ public class CosmeticsLoader : MonoBehaviour
 
         if (www.isNetworkError || www.isHttpError)
         {
-            Error($"Failed {Kind} [{src.Alias}]: {www.error}");
+            Error($"[{src.Alias}] config fetch failed: {www.error}", Kind);
             _ok = false;
             goto done;
         }
@@ -129,9 +179,10 @@ public class CosmeticsLoader : MonoBehaviour
             var path = ConfigPath(src.Alias);
             File.WriteAllText(path, www.downloadHandler.text);
             OnConfig(File.ReadAllText(path), local: false);
+            RequestInject();
             shouldDownload = _ok && !Main.LocalOnly.Value;
         }
-        catch (Exception ex) { _ok = false; Warn($"Parse {Kind} [{src.Alias}]: {ex.Message}"); }
+        catch (Exception ex) { _ok = false; Warn($"[{src.Alias}] config parse failed: {ex.Message}", Kind); }
         if (shouldDownload) { var list = MissingFiles(); if (list.Count > 0) yield return CoDownload(list); }
 
     done:
@@ -142,23 +193,22 @@ public class CosmeticsLoader : MonoBehaviour
     [HideFromIl2Cpp]
     private IEnumerator CoDownload(List<string> files)
     {
-        var n = 0;
-        foreach (var f in files)
-        {
-            n++;
-            Message($"[{n}/{files.Count}] {Kind}/{f}");
-            yield return CoDownloadOne(f);
-        }
-        Message($"Done {files.Count} {Kind} files");
+        for (var i = 0; i < files.Count; i++)
+            yield return CoDownloadOne(files[i], i + 1, files.Count);
+
+        Message($"download finished, {files.Count} files", Kind);
+        OnDownloadComplete();
     }
 
     [HideFromIl2Cpp]
-    private IEnumerator CoDownloadOne(string pathName)
+    private IEnumerator CoDownloadOne(string relativePath, int index, int total)
     {
-        var parts = pathName.Split('/');
+        var parts = relativePath.Split('/');
         var alias = parts.Length > 1 ? parts[0] : Alias;
-        var name = parts.Length > 1 ? parts[^1] : pathName;
+        var name = parts.Length > 1 ? parts[^1] : relativePath;
         var src = _sources.Find(s => s.Alias == alias) ?? _sources[0];
+
+        Message($"[{alias}] downloading {name} ({index}/{total})", Kind);
 
         var www = new UnityWebRequest();
         www.SetMethod(UnityWebRequest.UnityWebRequestMethod.Get);
@@ -181,11 +231,16 @@ public class CosmeticsLoader : MonoBehaviour
             while (!task.IsCompleted)
                 yield return new WaitForEndOfFrame();
             if (task.IsFaulted)
-                Error($"{name}: {task.Exception?.Message}");
+                Error($"[{alias}] write failed: {task.Exception?.Message}", Kind);
+            else
+            {
+                OnFileReady(relativePath);
+                RequestInject();
+            }
         }
         else
         {
-            Warn($"Download failed {Kind}/{name}: {www.error}");
+            Warn($"[{alias}] download failed: {www.error}", Kind);
         }
 
         www.downloadHandler.Dispose();
