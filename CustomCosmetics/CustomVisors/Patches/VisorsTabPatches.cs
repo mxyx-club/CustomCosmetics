@@ -1,10 +1,7 @@
 using AmongUs.Data;
-using Cpp2IL.Core.Extensions;
-using CustomCosmetics.Core;
 using Innersloth.Assets;
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using TMPro;
 using UnityEngine;
 using UObject = UnityEngine.Object;
@@ -15,72 +12,33 @@ namespace CustomCosmetics.CustomVisors.Patches;
 internal static class VisorsTabPatches
 {
     private static TextMeshPro _textTemplate;
-    private static bool _injected;
-
-    private static void EnsureInjectedVisors(HatManager hm)
-    {
-        // tab fallback: also injects when GetVisorById was never called (e.g. visors disabled at startup)
-        if (_injected || CustomVisorManager.UnregisteredVisors.Count == 0) return;
-
-        try
-        {
-            var all = hm.allVisors != null ? hm.allVisors.ToList() : new List<VisorData>();
-            var cache = CustomVisorManager.UnregisteredVisors.Clone();
-            foreach (var vc in cache)
-            {
-                try
-                {
-                    all.Add(CustomVisorManager.CreateVisorBehaviour(vc));
-                    CustomVisorManager.UnregisteredVisors.Remove(vc);
-                }
-                catch { }
-            }
-            hm.allVisors = all.ToArray();
-            if (CustomVisorManager.UnregisteredVisors.Count == 0) _injected = true;
-        }
-        catch (Exception ex)
-        {
-            Warn($"EnsureInjectedVisors failed: {ex}");
-        }
-    }
 
     [HarmonyPatch(nameof(VisorsTab.OnEnable))]
     [HarmonyPrefix]
-    private static void OnEnablePrefix(VisorsTab __instance)
-    {
-        try
-        {
-            var hatManager = DestroyableSingleton<HatManager>.Instance;
-            if (hatManager == null) return;
-            EnsureInjectedVisors(hatManager);
-        }
-        catch (Exception ex)
-        {
-            Warn($"VisorsTab prefix failed: {ex}");
-        }
-    }
-
-    [HarmonyPatch(nameof(VisorsTab.OnEnable))]
-    [HarmonyPrefix]
-    private static bool RebuildPrefix(VisorsTab __instance)
+    private static bool OnEnablePrefix(VisorsTab __instance)
     {
         try
         {
             var hatManager = DestroyableSingleton<HatManager>.Instance;
             if (hatManager == null) return false;
-            EnsureInjectedVisors(hatManager);
+
+            // fallback: GetVisorById never runs when visors stay disabled at launch
+            CustomVisorManager.PromoteAll();
+            CustomVisorManager.InjectReady(hatManager, CustomVisorManager.InjectPerFrame);
 
             var allVisors = hatManager.allVisors;
             if (allVisors == null) return false;
 
             var packages = new Dictionary<string, List<VisorData>>();
-            foreach (var v in allVisors)
+            foreach (var visor in allVisors)
             {
-                if (v == null) continue;
-                var pkg = CustomVisorManager.PackageCache.TryGetValue(v.name, out var p) ? p : "Innersloth";
-                if (!packages.ContainsKey(pkg))
-                    packages[pkg] = new List<VisorData>();
-                packages[pkg].Add(v);
+                if (visor == null) continue;
+                var packageName = CustomVisorManager.PackageCache.TryGetValue(visor.name, out var package)
+                    ? package
+                    : "Innersloth";
+                if (!packages.ContainsKey(packageName))
+                    packages[packageName] = new List<VisorData>();
+                packages[packageName].Add(visor);
             }
 
             // stop vanilla preview coroutines before destroying chips (avoid NRE on destroyed objects)
@@ -91,13 +49,13 @@ internal static class VisorsTabPatches
             var yOffset = __instance.YStart - 0.5f * __instance.YOffset;
             _textTemplate = Core.Helpers.GetTitleTemplate(__instance, ref _textTemplate);
 
-            var orderedKeys = Core.Helpers.OrderPackageKeys(packages.Keys, "Innersloth",
+            var packageOrder = Core.Helpers.OrderPackageKeys(packages.Keys, "Innersloth",
                 CustomVisorManager.PackagePriorities);
-            foreach (var key in orderedKeys)
+            foreach (var packageName in packageOrder)
             {
-                var list = packages[key];
-                InsertNoVisor(list, hatManager);
-                yOffset = CreatePackage(list, key, yOffset, __instance);
+                var visors = packages[packageName];
+                InsertNoVisor(visors, hatManager);
+                yOffset = CreatePackage(visors, packageName, yOffset, __instance);
             }
 
             __instance.scroller.ContentYBounds.max = -(yOffset + 4.1f);
@@ -105,23 +63,23 @@ internal static class VisorsTabPatches
         }
         catch (Exception ex)
         {
-            Error($"VisorsTab rebuild failed: {ex}");
+            Error($"tab rebuild failed: {ex}", "visors");
             return false;
         }
     }
 
-    private static void InsertNoVisor(List<VisorData> visors, HatManager hm)
+    private static void InsertNoVisor(List<VisorData> visors, HatManager hatManager)
     {
         // empty visor at head of every package (vanilla visor_EmptyVisor)
         if (visors.Count > 0 && visors[0].ProductId == "visor_EmptyVisor") return;
-        var noVisor = hm.GetVisorById("visor_EmptyVisor");
+        var noVisor = hatManager.GetVisorById("visor_EmptyVisor");
         if (noVisor != null)
             visors.Insert(0, noVisor);
     }
 
-    private static float CreatePackage(List<VisorData> visors, string pkg, float yStart, VisorsTab tab)
+    private static float CreatePackage(List<VisorData> visors, string packageName, float yStart, VisorsTab tab)
     {
-        var isVanilla = pkg == "Innersloth";
+        var isVanilla = packageName == "Innersloth";
         var offset = yStart;
 
         if (_textTemplate != null)
@@ -135,64 +93,66 @@ internal static class VisorsTabPatches
             title.fontSize *= 0.5f;
             title.enableAutoSizing = false;
             var displayName = isVanilla
-                ? pkg
-                : (CustomVisorManager.PackageDisplayNames.TryGetValue(pkg, out var dn) ? dn : pkg);
+                ? packageName
+                : (CustomVisorManager.PackageDisplayNames.TryGetValue(packageName, out var customName)
+                    ? customName
+                    : packageName);
             tab.StartCoroutine(Effects.Lerp(0.1f, new Action<float>(_ => title.SetText(displayName))));
             offset -= 0.6f * tab.YOffset;
         }
 
         for (var i = 0; i < visors.Count; i++)
         {
-            var v = visors[i];
+            var visor = visors[i];
             var xPos = tab.XRange.Lerp(i % tab.NumPerRow / (tab.NumPerRow - 1f));
             var yPos = offset - (i / tab.NumPerRow * tab.YOffset);
             var chip = UObject.Instantiate(tab.ColorTabPrefab, tab.scroller.Inner);
             // vanilla VisorsTab.Update compares chip.ProductId
-            chip.ProductId = v.ProductId;
+            chip.ProductId = visor.ProductId;
 
             if (ActiveInputManager.currentControlType == ActiveInputManager.InputType.Keyboard)
             {
-                chip.Button.OnMouseOver.AddListener((Action)(() => tab.SelectVisor(v)));
+                chip.Button.OnMouseOver.AddListener((Action)(() => tab.SelectVisor(visor)));
                 chip.Button.OnMouseOut.AddListener((Action)(() =>
                     tab.SelectVisor(DestroyableSingleton<HatManager>.Instance.GetVisorById(DataManager.Player.Customization.Visor))));
                 chip.Button.OnClick.AddListener((Action)tab.ClickEquip);
             }
             else
             {
-                chip.Button.OnClick.AddListener((Action)(() => tab.SelectVisor(v)));
+                chip.Button.OnClick.AddListener((Action)(() => tab.SelectVisor(visor)));
             }
             chip.Button.ClickMask = tab.scroller.Hitbox;
             if (chip.Inner != null)
             {
                 chip.Inner.SetMaskType(PlayerMaterial.MaskType.ScrollingUI);
-                tab.UpdateMaterials(chip.Inner.FrontLayer, v);
+                tab.UpdateMaterials(chip.Inner.FrontLayer, visor);
             }
 
             chip.transform.localPosition = new Vector3(xPos, yPos, -1f);
-            var sr = FindVisorSprite(chip);
-            if (sr != null)
+            var renderer = FindVisorSprite(chip);
+            if (renderer != null)
             {
-                if (CustomVisorManager.ViewDataCache.TryGetValue(v.name, out var vd))
+                if (CustomVisorManager.ViewDataCache.TryGetValue(visor.name, out var viewData))
                 {
-                    sr.sprite = vd.IdleFrame;
-                    sr.maskInteraction = SpriteMaskInteraction.VisibleInsideMask;
+                    renderer.sprite = viewData.IdleFrame;
+                    renderer.maskInteraction = SpriteMaskInteraction.VisibleInsideMask;
                 }
                 else
                 {
-                    var srRef = sr;
+                    var chipRenderer = renderer;
                     tab.StartCoroutine(AddressableAssetExtensions.CoLoadAssetAsync<VisorViewData>(tab,
-                        v.ViewDataRef,
-                        (Action<VisorViewData>)(vd2 =>
+                        visor.ViewDataRef,
+                        (Action<VisorViewData>)(loaded =>
                         {
-                            if (vd2 != null && srRef != null)
+                            if (loaded != null && chipRenderer != null)
                             {
-                                srRef.sprite = vd2.IdleFrame;
-                                srRef.maskInteraction = SpriteMaskInteraction.VisibleInsideMask;
+                                chipRenderer.sprite = loaded.IdleFrame;
+                                chipRenderer.maskInteraction = SpriteMaskInteraction.VisibleInsideMask;
                             }
                         })));
                 }
             }
-            chip.Tag = v;
+            chip.Tag = visor;
             chip.SelectionHighlight.gameObject.SetActive(false);
             tab.ColorChips.Add(chip);
         }
@@ -208,19 +168,19 @@ internal static class VisorsTabPatches
 
         if (root.childCount > 2)
         {
-            var c2 = root.GetChild(2);
-            if (c2 != null && c2.childCount > 0)
+            var child = root.GetChild(2);
+            if (child != null && child.childCount > 0)
             {
-                var sr = c2.GetChild(0).GetComponent<SpriteRenderer>();
-                if (sr != null) return sr;
+                var spriteRenderer = child.GetChild(0).GetComponent<SpriteRenderer>();
+                if (spriteRenderer != null) return spriteRenderer;
             }
         }
 
-        foreach (var sr in root.GetComponentsInChildren<SpriteRenderer>(true))
-            if (sr != null && sr.sprite == null) return sr;
+        foreach (var spriteRenderer in root.GetComponentsInChildren<SpriteRenderer>(true))
+            if (spriteRenderer != null && spriteRenderer.sprite == null) return spriteRenderer;
 
-        var all = root.GetComponentsInChildren<SpriteRenderer>(true);
-        return all.Length > 0 ? all[all.Length - 1] : null;
+        var renderers = root.GetComponentsInChildren<SpriteRenderer>(true);
+        return renderers.Length > 0 ? renderers[^1] : null;
     }
 
     [HarmonyPatch(nameof(VisorsTab.SelectVisor))]

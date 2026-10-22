@@ -232,7 +232,7 @@ internal static class HatParentPatches
         }
         catch (Exception e)
         {
-            Warn($"Unable to create test hat \n{e}");
+            Warn($"test hat creation failed:\n{e}", "hats");
             return true;
         }
 

@@ -1,5 +1,4 @@
 using Cpp2IL.Core.Extensions;
-using System;
 using System.Linq;
 
 namespace CustomCosmetics.CustomPlates.Patches;

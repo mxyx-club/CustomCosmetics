@@ -15,32 +15,64 @@ public class VisorsLoader : CosmeticsLoader
 
     protected override void OnConfig(string json)
     {
-        var r = JsonSerializer.Deserialize<VisorsConfigFile>(json, new JsonSerializerOptions
+        var config = JsonSerializer.Deserialize<VisorsConfigFile>(json, new JsonSerializerOptions
         {
             AllowTrailingCommas = true,
             PropertyNameCaseInsensitive = true
         });
-        if (r == null || r.Visors == null) return;
+        if (config?.Visors == null) return;
 
-        RegisterPackages(r.Packages, CustomVisorManager.PackageDisplayNames, CustomVisorManager.PackagePriorities);
+        RegisterPackages(config.Packages, CustomVisorManager.PackageDisplayNames, CustomVisorManager.PackagePriorities);
+        PrefixResources(config);
+        var dropped = config.Visors.RemoveAll(visor => visor.Resource == null);
+        if (dropped > 0) Warn($"[{Alias}] {dropped} entries without a valid .png resource skipped", Kind);
+        CustomVisorManager.UnregisteredVisors.AddRange(config.Visors);
+        Message($"[{Alias}] {config.Visors.Count} visors loaded, {MissingFiles().Count} resources to sync", Kind);
+        CustomVisorManager.PromoteAll();
+    }
 
-        foreach (var v in r.Visors)
+    protected override void OnFileReady(string file) => CustomVisorManager.PromoteFor(file);
+
+    // HostNotReady makes the drain loop retry on the next frame
+    protected override int InjectBatch()
+    {
+        if (CustomVisorManager.ReadyVisors.Count == 0) return 0;
+        var hatManager = DestroyableSingleton<HatManager>.Instance;
+        return hatManager == null || hatManager.allVisors == null
+            ? HostNotReady
+            : CustomVisorManager.InjectReady(hatManager, CustomVisorManager.InjectPerFrame);
+    }
+
+    protected override void OnDownloadComplete()
+    {
+        var blocked = new List<string>();
+        foreach (var visor in CustomVisorManager.UnregisteredVisors)
         {
-            v.Resource = PrefixResource(v.Resource);
-            v.FlipResource = PrefixResource(v.FlipResource);
+            var gate = CustomVisorManager.MissingGateField(visor);
+            if (gate != null) blocked.Add($"{visor.Name}({gate})");
         }
-        CustomVisorManager.UnregisteredVisors.AddRange(r.Visors);
-        Message($"Loaded {r.Visors.Count} visors ({MissingFiles().Count} resource files)");
+        ReportNotReady(blocked);
     }
 
     protected override List<string> MissingFiles()
     {
-        var list = new List<string>();
-        foreach (var v in CustomVisorManager.UnregisteredVisors)
+        var files = new List<string>();
+        foreach (var visor in CustomVisorManager.UnregisteredVisors)
         {
-            if (v.Resource != null && NeedDownload(v.Resource, v.ResHashA, LocalDir)) list.Add(v.Resource);
-            if (v.FlipResource != null && NeedDownload(v.FlipResource, v.ResHashF, LocalDir)) list.Add(v.FlipResource);
+            if (visor.Resource != null && NeedDownload(visor.Resource, visor.ResHashA, LocalDir))
+                files.Add(visor.Resource);
+            if (visor.FlipResource != null && NeedDownload(visor.FlipResource, visor.ResHashF, LocalDir))
+                files.Add(visor.FlipResource);
         }
-        return list;
+        return files;
+    }
+
+    private void PrefixResources(VisorsConfigFile config)
+    {
+        foreach (var visor in config.Visors)
+        {
+            visor.Resource = PrefixResource(visor.Resource);
+            visor.FlipResource = PrefixResource(visor.FlipResource);
+        }
     }
 }

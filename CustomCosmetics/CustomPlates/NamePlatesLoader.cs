@@ -27,7 +27,7 @@ public class NamePlatesLoader : CosmeticsLoader
         foreach (var p in r.NamePlates)
             p.Resource = PrefixResource(p.Resource);
         CustomNamePlateManager.UnregisteredPlates.AddRange(r.NamePlates);
-        Message($"Loaded {r.NamePlates.Count} nameplates ({MissingFiles().Count} resource files)");
+        Message($"[{Alias}] {r.NamePlates.Count} nameplates loaded, {MissingFiles().Count} resources to sync", Kind);
     }
 
     protected override List<string> MissingFiles()
